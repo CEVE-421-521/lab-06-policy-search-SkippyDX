@@ -1,6 +1,6 @@
 ---
 title: "Lab 6: Policy Search"
-author: "Your Name (netID)"
+author: "Kyle Olcott kto1"
 jupyter: julia-1.10
 date: 2024-03-01
 week: 7
@@ -51,7 +51,86 @@ Plots.default(; margin=5Plots.mm)
 ```
 
 ```{julia}
-function objective_function(a::AbstractFloat)
-    return true # PLACEHOLDER
+options = Options(; time_limit=1.0)
+algorithm = ECA(; options=options)
+Random.seed!(2024)
+D = 1
+bounds = boxconstraints(; lb=0*ones(D), ub=14ones(D))
+```
+
+```{julia}
+function objective_function(a) # Took away the abstract float thing to make the constraints work as they are vectors
+a = a[1,1]
+tempa = [Action(a*1u"ft")]
+a = []
+N_SOW = 10 # Change to 100000 later
+for i in 1:N_SOW 
+    a = append!(a, tempa)
+end
+slr_scenarios = let
+    df = CSV.read("data/slr_oddo.csv", DataFrame)
+    [Oddo17SLR(a, b, c, tstar, cstar) for (a, b, c, tstar, cstar) in eachrow(df)]
+end
+
+house = let
+    haz_fl_dept = CSV.read("data/haz_fl_dept.csv", DataFrame) # read in the file
+    desc = "one story, Contents, fresh water, short duration"
+    row = @rsubset(haz_fl_dept, :Description == desc)[1, :] # select the row I want
+    area = 1033u"ft^2"
+    height_above_gauge = 4u"ft"
+    House(row; area=area, height_above_gauge=height_above_gauge, value_usd=316_298)
+end
+
+p = ModelParams(; house=house, years=2024:2083)
+
+function draw_surge_distribution()
+    μ = rand(Normal(5, 1))
+    σ = rand(Exponential(1.5))
+    ξ = rand(Normal(0.1, 0.05))
+    return GeneralizedExtremeValue(μ, σ, ξ)
+end
+function draw_discount_rate()
+    return rand(Normal(0.1, 0.02))
+end
+
+sows = [
+    SOW(rand(slr_scenarios), draw_surge_distribution(), draw_discount_rate()) for
+    _ in 1:N_SOW
+] # for 10 SOWs
+results = [run_sim(a, s, p) for (a, s) in zip(a, sows)]
+sum = 0.0    
+for i in 1:length(results)
+    sum += results[i]
+end
+sum = (sum * -1)/N_SOW
+    return sum
+end
+```
+
+```{julia}
+result = optimize(objective_function, bounds, algorithm)
+```
+
+```{julia}
+heights = []
+avgs = []
+for n in 0:14
+x = [n]
+tempaverage = objective_function(x)
+global heights = append!(heights, x)
+global avgs = append!(avgs, tempaverage)
+end
+
+let
+    scatter(
+        heights,
+        avgs;
+        xlabel="Elevation Action",
+        ylabel="Average Negative NPV",
+        label="The average negative NPV for elevating an apartment at different elevations under 100,000 different SOW's",
+        legend=:topright,
+        size=(800, 400),
+        yformatter=:plain, # prevents scientific notation
+    )
 end
 ```
