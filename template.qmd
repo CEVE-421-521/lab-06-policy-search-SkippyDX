@@ -51,7 +51,7 @@ Plots.default(; margin=5Plots.mm)
 ```
 
 ```{julia} 
-options = Options(; time_limit=1.0) # Establishes variables for the optimization function
+options = Options(; time_limit=30.0) # Establishes variables for the optimization function
 algorithm = ECA(; options=options)
 Random.seed!(2024)
 D = 1
@@ -59,14 +59,23 @@ bounds = boxconstraints(; lb=0*ones(D), ub=14ones(D))
 ```
 
 ```{julia}
-function objective_function(a) # Took away the abstract float thing to make the constraints work as they are vectors
-a = a[1,1]
-tempa = [Action(a*1u"ft")]
-a = []
-N_SOW = 10 # Change to 100000 later
-for i in 1:N_SOW # Creates N_SOW long vector to be applied to the SOW's later in the function
-    a = append!(a, tempa) 
+function draw_surge_distribution()
+    μ = rand(Normal(5, 1))
+    σ = rand(Exponential(1.5))
+    ξ = rand(Normal(0.1, 0.05))
+    return GeneralizedExtremeValue(μ, σ, ξ)
 end
+```
+
+```{julia}
+function draw_discount_rate()
+    return rand(Normal(0.05, 0.02))
+end
+```
+
+```{julia}
+N_SOW = 100000 # Change to 100000 later
+
 slr_scenarios = let
     df = CSV.read("data/slr_oddo.csv", DataFrame)
     [Oddo17SLR(a, b, c, tstar, cstar) for (a, b, c, tstar, cstar) in eachrow(df)]
@@ -74,29 +83,26 @@ end
 
 house = let # Creates the apartment in Galveston Peir 21
     haz_fl_dept = CSV.read("data/haz_fl_dept.csv", DataFrame) # read in the file
-    desc = "one story, Contents, fresh water, short duration"
+    desc = "Apartment, living area on one floor, Structure"
     row = @rsubset(haz_fl_dept, :Description == desc)[1, :] # select the row I want
     area = 1033u"ft^2"
-    height_above_gauge = 4u"ft"
+    height_above_gauge = 9u"ft"
     House(row; area=area, height_above_gauge=height_above_gauge, value_usd=316_298)
 end
 
 p = ModelParams(; house=house, years=2024:2083)
 
-function draw_surge_distribution()
-    μ = rand(Normal(5, 1))
-    σ = rand(Exponential(1.5))
-    ξ = rand(Normal(0.1, 0.05))
-    return GeneralizedExtremeValue(μ, σ, ξ)
-end
-function draw_discount_rate()
-    return rand(Normal(0.1, 0.02))
-end
-
 sows = [
     SOW(rand(slr_scenarios), draw_surge_distribution(), draw_discount_rate()) for # Creates N_SOW state of worlds (SOWs)
     _ in 1:N_SOW
 ] # for 10 SOWs
+```
+
+```{julia}
+function objective_function(a) # Took away the abstract float thing to make the constraints work as they are vectors
+a = a[1,1] # Next three lines make a vector of the same action to be applied to the SOWs
+a = a*ones(N_SOW)
+a = Action.(a*1u"ft")
 results = [run_sim(a, s, p) for (a, s) in zip(a, sows)] # Uses command from lab 5 with the action vector made above
 sum = 0.0    
 for i in 1:length(results) # Finds the sum of the NPV in the results vector
@@ -111,7 +117,7 @@ end
 result = optimize(objective_function, bounds, algorithm)
 ```
 
-```{julia}
+``{julia}
 heights = [] 
 avgs = []
 for n in 0:14 # Runs the function from 0 ft to 14 ft and graphs the output
@@ -127,7 +133,6 @@ let
         avgs;
         xlabel="Elevation Action",
         ylabel="Average Negative NPV",
-        label="The average negative NPV for elevating an apartment at different elevations under 100,000 different SOW's",
         legend=:topright,
         size=(800, 400),
         yformatter=:plain, # prevents scientific notation
