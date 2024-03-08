@@ -51,7 +51,7 @@ Plots.default(; margin=5Plots.mm)
 ```
 
 ```{julia} 
-options = Options(; time_limit=30.0) # Establishes variables for the optimization function
+options = Options(; time_limit=750.0) # Establishes variables for the optimization function
 algorithm = ECA(; options=options)
 Random.seed!(2024)
 D = 1
@@ -74,7 +74,8 @@ end
 ```
 
 ```{julia}
-N_SOW = 100000 # Change to 100000 later
+N_SOW_TOTAL = 100000
+N_SOW = 3000 # Change to 100000 later
 
 slr_scenarios = let
     df = CSV.read("data/slr_oddo.csv", DataFrame)
@@ -92,10 +93,12 @@ end
 
 p = ModelParams(; house=house, years=2024:2083)
 
-sows = [
+totalsows = [
     SOW(rand(slr_scenarios), draw_surge_distribution(), draw_discount_rate()) for # Creates N_SOW state of worlds (SOWs)
-    _ in 1:N_SOW
-] # for 10 SOWs
+    _ in 1:N_SOW_TOTAL
+] # for 100000 SOWs
+sows = totalsows[1:N_SOW]
+print(sows)
 ```
 
 ```{julia}
@@ -117,9 +120,11 @@ end
 result = optimize(objective_function, bounds, algorithm)
 ```
 
-``{julia}
+```{julia}
 heights = [] 
 avgs = []
+N_SOW = N_SOW_TOTAL
+sows = totalsows
 for n in 0:14 # Runs the function from 0 ft to 14 ft and graphs the output
 x = [n]
 tempaverage = objective_function(x) 
@@ -139,3 +144,17 @@ let
     )
 end
 ```
+
+# Reflection
+
+1. How are we framing this problem? What are the decision variables, the objective function, and the states of the world over which we optimize?
+
+The only decision variable in our model currently is how high we want to elevate the house in year 0. The objective function we have takes this decision and the house object we've made, and applies a SOW to it to determine the negative NPV we get from elevating the house and the cost needed to repair it after flooding. Each SOW has 3 variables that will affect the repair cost, the discount rate, which determines how much the cost of repair means to us in the present, the storm surge dist, which creates an expected flood height that may damage our house during each year, and sea level rise, which is added onto the storm surge to damage our house even more. In the optimization problem, we want the action that produced the highest (least negative) NPV over a large sample of SOWs.
+
+2. Digging deeper, we are averaging the objective function computed over a finite number of states of the world. This assumes that they are all drawn from a distribution representing the “true” distribution of states of the world. Is this a good assumption?
+
+I think that this is a good assumption. It gets us past the problems with consolidative modeling by admitting that we can't definitively say what sea level rise or the discount rate might be, so taking a range of reasonable possibilities to use in an exploratory model makes our model more robust. It is unreasonable to say, though, that the real SOW will always come from our ranges, as an unforeseen event, such as a major recession, might do something like pull the discount rate down below our distribution.
+
+3. What’s not being considered in this analysis that might be important?
+
+As discussed above, unforeseen events may take us into an unaccounted SOW or add additional costs. For example, another natural disaster may damage our house, forcing us to rebuild it. Additionally, this model doesn't accurately account for scarcity occuring after a flood, as the cost of labor and materials to rebuild may be in high demand and much more expensive compared to the actual value of the house. Finally changes in the topography or surrounding area may increase or decrease the likelihood of flooding. For example, the implementation of a flood wall could greatly decrease how much damage our house takes. Conversely, if our community uses lots of groundwater, subsidence could be a problem and decrease the house's elevation in relation to the gauge.
